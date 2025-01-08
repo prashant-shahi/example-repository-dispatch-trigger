@@ -1,0 +1,53 @@
+name: trigger-workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_repository:
+        description: "The target repository to dispatch the event to"
+        required: true
+      event_type:
+        description: "The event type to send to the workflow"
+        required: true
+      payload:
+        description: "The payload to send to the workflow"
+        default: "{}"
+
+permissions:
+  contents: write
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: trigger-event
+        env:
+          target_repository: ${{ inputs.target_repository }}
+          event_type: ${{ inputs.event_type }}
+          payload: ${{ inputs.payload }}
+        run: |
+          echo "workflow_dispatch triggered by ${{ github.actor }}"
+          echo "validating payload JSON"
+          if ! echo ${payload} | jq '.' > /dev/null; then
+            echo "invalid JSON payload ${payload}"
+            exit 1
+          fi
+
+          echo "creating cURL payload"
+          if [[ "${payload}" != "{}" ]]; then
+            curl_payload="{\"event_type\":\"${event_type}\",\"client_payload\":${payload}}"
+          else
+            curl_payload="{\"event_type\":\"${event_type}\"}"
+          fi
+
+          echo "payload: ${curl_payload}"
+
+          if ! curl -sSfL -X POST -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.REPOSITORY_TOKEN }}" \
+            -d "${curl_payload}" \
+            "https://api.github.com/repos/${{ github.repository_owner }}/${target_repository}/dispatches" > /dev/null 2>&1; then
+            echo "failed to dispatch event"
+            exit 1
+          fi
+
+          echo "event dispatched successfully"
